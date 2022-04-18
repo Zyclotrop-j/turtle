@@ -1,336 +1,8 @@
-import * as PIXI from 'pixi.js';
-
-/**
- * Helper Classes
- */
-
-class PixiCanvas {
-    // todo: convert all inputs and output from pixel to world-coordinates and vice-versa
-    static #defaultCanvas;
-    static get defaultCanvas() {
-        if(!PixiCanvas.#defaultCanvas) {
-            PixiCanvas.#defaultCanvas = new PixiCanvas();
-        }
-        return PixiCanvas.#defaultCanvas;
-    }
-    static #PixiCanvases = [];
-    constructor({ app, view, turtle, _canvas } = {}) {
-        this.#app = app ?? new PIXI.Application({
-            backgroundColor: 0xFFFFFF
-        });
-        // todo: this.#app.screen is event target!!
-        this.view = view ?? this.#app.view;
-        this.turtle = turtle ?? null;
-    }
-    #minx
-    #miny
-    #maxx
-    #maxy
-    #objects = [];
-    static #PIXI_CANVAS = Symbol("PIXI_CANVAS");
-    bind(turtle) {
-        return new PixiCanvas({
-            app: this.#app,
-            view: this.view,
-            turtle,
-        });
-    }
-    #app;
-    #group(fn) {
-        const graphics = new PIXI.Graphics();
-        fn(graphics);
-        this.#app.stage.addChild(graphics);
-        this.#objects.push(graphics);
-        return { w: graphics.width, h: graphics.height };
-    }
-    circle([x, y], { radius, fill, color }) {
-        return this.#group(graphics => {
-            if(fill) {
-                graphics.lineStyle(0);
-            } else {
-                graphics.lineStyle(radius * 0.1, fill);
-            }
-            graphics.beginFill(fill ? color : "white", 1, 0);
-            graphics.drawCircle(x, y, fill ? radius : fill * 0.9);
-            graphics.endFill();
-        });
-    }
-    line([x1, y1], [x2, y2], { color, width }) {
-        return this.#group(graphics =>  {
-            graphics.lineStyle(width, color, 1);
-            graphics.moveTo(x1, y1);
-            graphics.lineTo(x2, y2);
-        });
-    }
-    drawShape([x, y], {
-        shape: name, // shape or name of shape
-        rotate = 0
-    }) {
-        const shape = this.#shapes[name] ?? name;
-        this.modifyShape([x, y], {
-            shape: name,
-            rotate
-        });
-        if(!this.#objects.includes(shape)) {
-            this.#app.stage.addChild(shape);
-            this.#objects.push(shape);
-        }
-        return { w: shape.width, h: shape.height };
-    }
-    modifyShape([x, y], {
-        shape: name, // shape or name of shape
-        rotate,
-        scale,
-        skew,
-    }) {
-        const shape = this.#shapes[name] ?? name;
-        // todo: transform coordinates
-        if(x !== undefined) shape.x = x;
-        if(y !== undefined) shape.y = y;
-        if(rotate !== undefined) shape.rotation = rotate;
-        if(scale !== undefined) shape.scale = scale;
-        if(skew !== undefined) shape.skew = skew;
-    }
-    removeShape(id) {
-        const shape = this.#shapes[name] ?? name;
-        this.#app.stage.removeChild(shape);
-        shape.destroy();
-        this.#objects.splice(this.#objects.indexOf(shape), 1);
-    }
-    #shapes = {};
-    #_loadercache = {}
-    #loadercache(name, asset) {
-        if(this.#_loadercache[`${name}-${asset}`]) {
-            return this.#_loadercache[`${name}-${asset}`]
-        }
-        this.#_loadercache[`${name}-${asset}`] = new Promise(res => {
-            app.loader.add(name, 'assets/turtle.png').load((loader, resources) => {
-                res({ loader, resources });
-            });
-        });
-        return this.#_loadercache[`${name}-${asset}`];
-    }
-    registerShape(name, data, options = {}) {
-        if(this.#shapes[name]) {
-            throw new Error(`Shape with name '${name}' already registered!`);
-        }
-        if(typeof data === 'string') {
-            this.#shapes[name] = new PIXI.Container();
-            return new Promise(res => {
-                this.#loadercache(name, data).then(({ loader, resources }) => {
-                    const shape = new PIXI.Sprite(resources[name].texture);
-                    shape.x = shape.y = 0;
-                    this.#shapes[name].addChild(shape);
-                    if(options.interactive) {
-                        shape.interactive = true;
-                    }
-                    if(options.buttonMode) {
-                        shape.buttonMode = true;
-                    }
-                    Object.entries(options).filter(([k, v]) => k.startsWith('on') && typeof v === 'function').forEach(([k, v]) => {
-                        shape.on(k.substring('on'.length), v);
-                    });
-                    res(shape);
-                });
-            });
-        }
-        const tupleconstrutor = (data, options, shapeoptions = {}) => {
-            const scale = options.scale ?? 1;
-            const path = data.map(([x, y]) => [x * scale, y * scale]).flat();
-            this.#shapes[name] = new PIXI.Container();
-            const graphics = new PIXI.Graphics();
-            this.#shapes[name].addChild(graphics);
-            graphics.lineStyle(0);
-            graphics.beginFill(options.color ?? 0x3500FA, options.opacity ?? 1);
-            graphics.drawPolygon(path);
-            graphics.endFill();
-            if(options.interactive) {
-                graphics.interactive = true;
-            }
-            if(options.buttonMode) {
-                graphics.buttonMode = true;
-            }
-            if(shapeoptions.rotate) {
-                graphics.rotation = shapeoptions.rotate;
-            }
-            Object.entries(options).filter(([k, v]) => k.startsWith('on') && typeof v === 'function').forEach(([k, v]) => {
-                graphics.on(k.substring('on'.length), v);
-            });
-            return { w: graphics.width, h: graphics.height };
-        }
-        if(data instanceof Shape && data.type === "polygon") {
-            return tupleconstrutor(data.data, options, data.options);
-        }
-        if(Array.isArray(data) && data.every((j) => Array.isArray(j) && j.length === 2)) {
-            return tupleconstrutor(data, options);
-        }
-        throw new Error(`Unsupported shape type ${typeof data}`);
-    }
-    clear() {
-        this.#objects.splice(0, this.#objects.length).forEach(obj => {
-            this.#app.stage.removeChild(obj);
-            obj.destroy?.();
-        });
-    }
-    #_fontCache = new Map();
-    #fontCache(settings) {
-        const finalMap = Object.keys(settings).sort().reduce((cache, key) => {
-            const value = settings[key];
-            if(!cache.has(key)) {
-                cache.set(key, new Map());
-            }
-            if(!cache.get(key).has(value)) {
-                cache.get(key).set(value, new Map());
-            }
-            return cache.get(key).get(value);
-        }, this.#_fontCache);
-        if(finalMap.has("data")) {
-            return finalMap.get("data");
-        }
-        const obj = new PIXI.TextStyle(settings);
-        finalMap.set("data", obj);
-        return finalMap.get("data");
-    }
-    write([x, y], { arg, move = false, align = 'left', font = ['Arial', 8, 'normal'] } = {}) {
-        const [fontFamily, fontSize, fontStyle] = font;
-        const richText = new PIXI.Text(arg.toString(), this.#fontCache({
-            fontFamily,
-            fontSize,
-            fontStyle,
-            fill: "#ffffff",
-            /*
-            fontWeight: 'bold',
-            fill: ['#ffffff', '#00ff99'], // gradient
-            stroke: '#4a1850',
-            strokeThickness: 5,
-            dropShadow: true,
-            dropShadowColor: '#000000',
-            dropShadowBlur: 4,
-            dropShadowAngle: Math.PI / 6,
-            dropShadowDistance: 6,
-            wordWrap: true,
-            wordWrapWidth: 440,
-            lineJoin: 'round',
-            */
-        }));
-        richText.x = x;
-        richText.y = y;
-        this.#app.stage.addChild(richText);
-        this.#objects.push(richText);
-        return { w: richText.width, h: richText.height };
-    }
-    get width() {
-        return this.#app.screen.width;
-    }
-    get height() {
-        return this.#app.screen.height;
-    }
-    get x0y0() {
-        return "TL"; // or BL - where's 0 in this screen - top-left or bottom-left
-    }
-    #attachedTo
-    renderInto(domElement) {
-        domElement.appendChild(this.view);
-        this.#app.resizeTo = domElement;
-    }
-}
-
-class Shape {
-    #type_
-    #data
-    #options
-    constructor(type_, data, options = {}) {
-        this.#type_ = type_;
-        this.#data = data ?? [];
-        this.#options = options;
-    }
-    get data() {
-        return this.#data;
-    }
-    get type() {
-        return this.#type_;
-    }
-    get options() {
-        return { ...this.#options };
-    }
-    addcomponent(poly, fill, outline = null) {
-        this.#data.push({
-            poly, fill, outline
-        });
-    }
-}
-const PI_2 = Math.PI * 2;
-const toRad = deg => deg * Math.PI / 180;
-const toDeg = rad => rad / Math.PI * 180;
-const normalize = degrees => {
-    return degrees % 360;
-};
-const normalizeArgs = (x, y) => {
-    if(x[0] !== undefined && x[1] !== undefined && y === undefined) {
-        return [x[0], x[1]];
-    } else {
-        return [x, y];
-    } 
-}
-class Vec2D {
-    constructor(x, y) {
-        const normal = normalizeArgs(x, y);
-        this.x = normal[0]; this.y = normal[1];
-    }
-    static normalizeArgs(x, y) {
-        return normalizeArgs(x, y);
-    }
-    x;
-    y;
-    static add(a, b) {
-        return new Vec2D(a.x + b.x, a.y + b.y);
-    }
-    static substract(a, b) {
-        return new Vec2D(a.x - b.x, a.y - b.y);
-    }
-    static innerProduct(a, b) {
-        return new Vec2D(a.x * b.x, a.y * b.y);
-    }
-    static scalarProduct(a, k) {
-        return new Vec2D(a.x * k, a.y * k);
-    }
-    static abs(a) {
-        return new Vec2D(Math.abs(a.x), Math.abs(a.y));
-    }
-    static rotate(a, angle) {
-        const perp = new Vec2D(-a.y, a.x);
-        const radangle = toRad(angle);
-        const c = Math.cos(radangle), s = Math.sin(radangle);
-        return Vec2D(a.x*c+perp.x*s, a.y*c+perp.y*s);
-    }
-    add(b) {
-        return Vec2D.add(this, b);
-    }
-    substract(b) {
-        return Vec2D.substract(this, b);
-    }
-    innerProduct(b) {
-        return Vec2D.innerProduct(this, b);
-    }
-    scalarProduct(k) {
-        return Vec2D.scalarProduct(this, k);
-    }
-    abs() {
-        return Vec2D.abs(this);
-    }
-    rotate(angle) {
-        return Vec2D.rotate(this, angle);
-    }
-    toJSON() {
-        return [this.x, this.y]
-    }
-    toArray() {
-        return this.toJSON();
-    }
-    valueOf() {
-        return Math.atan(this.y/this.x);
-    }
-}
+import { PixiCanvas } from "./canvas.js";
+import { Dialog } from "./dialog.js";
+import { PI_2, toRad, toDeg, normalize, normalizeArgs, Vec2D } from "./util.js"
+import { Shape } from "./shape.js"
+import { Value } from "./value.js"
 
 /*
 Turtle motion
@@ -352,29 +24,93 @@ clearstamps()
 undo()
 speed()
 */
+
+const undobuffer = (obj, that) => new Proxy(Array.from(obj ?? { length: that.__undobuffersize ?? 1000 }), {
+  get(obj, prop) {
+    const prune = () => {
+      if(that.__undobuffersize === null) {
+          obj.splice(0, obj.length);
+      }
+      while(typeof that.__undobuffersize === 'number' && that.__undobuffersize > -1 && obj.length > that.__undobuffersize) {
+          obj.pop();
+      }
+    };
+    if(prop === 'prune') {
+      return prune;
+    }
+    if (prop in obj && typeof obj[prop] === 'function') {
+      return (...args) => {
+          const r = obj[prop](...args);
+          prune();
+          return r;
+      };
+    }
+    if (prop === 'size') {
+      return obj.length;
+    }
+  }
+});
+const SHAPE_90_DEG_ROTATE = { rotate: toRad(-90) };
+const SHAPE_WIDTH_HEIGHT_1 = {width: 1, height: 1 };
 class RawTurtle {
+    static #turtles = new Set();
     constructor(canvas, domelement) {
-        RawTurtle.#turtlecounter++;
-        this.#canvas = canvas.bind(this);
+        RawTurtle.#turtles.add(new WeakRef(this));
+        this.__regsiterCanvas(canvas);
         if(domelement) {
             this.renderInto(domelement);
         }
-        this.#undobuffer = null;
-        this.#_orient = RawTurtle.START_ORIENTATION[this.#mode ?? RawTurtle.DEFAULT_MODE];
+        this.__undobuffersize = null;
+        this.__undobuffer = undobuffer(undefined, this);
+        this.___orient = RawTurtle.START_ORIENTATION[this.__mode ?? RawTurtle.DEFAULT_MODE];
         //Object.values(RawTurtle.TURTLE_SHAPES).forEach(shapename => {
-        //    this.#canvas.registerShape(name, 'assets/turtle.png')
+        //    this.__canvas.registerShape(name, 'assets/turtle.png')
         //});
-        this.#turtleshape = RawTurtle.TURTLE_SHAPES.TURTLE;
-        this.#PEN = `PEN_${RawTurtle.#turtlecounter}`;
+        this.___turtleshape = RawTurtle.TURTLE_SHAPES.TURTLE;
+        this.__registerNewTurtle();
+
+        this.reset();
+    }
+    static __canvasregistrations = new WeakMap()
+    __regsiterCanvas(canvas = this.__canvas) {
+        if(RawTurtle.__canvasregistrations.has(this)) {
+            throw new Error(`Registering a canvas is only allowed to happen once per turtle!`);
+        }
+        const canvast = canvas.bind(this);
+        RawTurtle.__canvasregistrations.set(this, canvast);
+        const canvasIndex = RawTurtle.__canvasDirectory.indexOf(canvast);
+        if(canvasIndex > -1) {
+            this.__canvasindex = canvasIndex;
+        } else {
+            RawTurtle.__canvasDirectory.push(canvast);
+            this.__canvasindex = RawTurtle.__canvasDirectory.length - 1;
+        }
+    }
+    static buildAppearanceKey(__PEN, k) {
+        return `${__PEN}__turtle_appearance__${k}`;
+    }
+    static __pens = new WeakMap()
+    __registerNewTurtle() {
+        if(RawTurtle.__pens.has(this)) {
+            throw new Error(`Registering a pen is only allowed to happen once per turtle!`);
+        }
+        this.__PEN = `PEN_${++RawTurtle.__turtlecounter}`;
+        RawTurtle.__pens.set(this,this.__PEN);
         const buttonStates = {};
-        this.#canvas.registerShape(this.#PEN, RawTurtle[`${RawTurtle.TURTLE_SHAPES.TURTLE}Polygon`], {
+        Object.values(RawTurtle.TURTLE_SHAPES).forEach((k) => {
+            this.__canvas.registerShape(RawTurtle.buildAppearanceKey(this.__PEN, k), RawTurtle[`${k}Polygon`], { protected: true });
+        })
+        
+        this.__canvas.registerShape(this.__PEN, RawTurtle[`${RawTurtle.TURTLE_SHAPES.TURTLE}Polygon`], {
+            // todo: setup event listeners for screen and turtle!
+            // when click on canvas, then check this.__exitonclick -> if yes, call this.bye
             interactive: true, buttonMode: true,
             onpointerdown: (event) => {
                 // https://developer.mozilla.org/en-US/docs/Web/API/MouseEvent/button
                 const btn = event.button + 1; 
                 const { x, y } = event.screen; // does this property exist?
                 buttonStates[btn] = true;
-                this.#eventlisteners.click?.[`button${btn}`]?.forEach(fn => {
+                this.__eventlisteners.click?.[`button${btn}`]?.forEach(fn => {
                     fn(x, y);
                 })
             },
@@ -382,7 +118,7 @@ class RawTurtle {
                 const btn = event.button + 1; 
                 const { x, y } = event.screen; // does this property exist?
                 buttonStates[btn] = false;
-                this.#eventlisteners.release?.[`button${btn}`]?.forEach(fn => {
+                this.__eventlisteners.release?.[`button${btn}`]?.forEach(fn => {
                     fn(x, y);
                 })
             },
@@ -390,22 +126,25 @@ class RawTurtle {
                 const btn = event.button + 1; 
                 if(buttonStates[btn]) {
                     const { x, y } = event.screen; // does this property exist?
-                    this.#eventlisteners.release?.[`button${btn}`]?.forEach(fn => {
+                    this.__eventlisteners.release?.[`button${btn}`]?.forEach(fn => {
                         fn(x, y);
                     });
                 }
-            }
+            },
+            protected: true,
         });
-        // todo: register the other shapes
-        // todo: add other shapes on top of the pen and toggle them when changing this.#turtleshape
-        // todo: then add all shapes to a container, set this contianer to be names this.#PEN
-
-        this.reset();
     }
+    static __canvasDirectory = [];
     renderInto(domElement) {
-        this.#canvas.renderInto(domElement);
+        this.__canvas.renderInto(domElement);
     }
-    static #turtlecounter = 0;
+    static get shapetypepolygon() {
+        return Shape.types.POLYGON;
+    }
+    get shapetypepolygon() {
+        return Shape.types.POLYGON;
+    }
+    static __turtlecounter = 0;
     static TURTLE_SHAPES = {
         ARROW: "arrow",
         TURTLE: "turtle",
@@ -427,76 +166,117 @@ class RawTurtle {
     static DEFAULT_MODE = RawTurtle.MODES.STANDARD
     static DEFAULT_ANGLEOFFSET = 0
     static DEFAULT_ANGLEORIENT = 1
-    static #MODE_DEGREEE = "DEGREE"
-    static #MODE_RADIANS = "RADIANS";
-
-    #PEN
-
-    #mode = RawTurtle.DEFAULT_MODE;
-    #canvas;
-    #undobuffer;
-
-    #shown = true // : True/False
-    #pendown = true // : True/False
-    #pencolor = "black" // : color-string or color-tuple
-    #fillcolor // : color-string or color-tuple
-    #pensize = 1 // : positive number
-    #speed // : number in range 0..10
-    #_resizemode // : “auto” or “user” or “noresize” // todo: when this is set, re-calc the turtle
+    static __MODE_DEGREEE = "DEGREE"
+    static __MODE_RADIANS = "RADIANS";
     static RESIZEMODE = {
         AUTO: "auto",
         USER: "user",
         NORESIZE: "noresize"
     }
+    static _CFG = {
+        "width" : 0.5,  //todo             // Screen
+        "height" : 0.75,    //todo  
+        "canvwidth" : 400,    //todo  
+        "canvheight": 300,  //todo
+        "leftright": null,  //todo
+        "topbottom": null,  //todo
+        "mode": "standard",          // TurtleScreen
+        "colormode": 1,
+        "delay": 10,
+        "undobuffersize": 1000,  //todo      // RawTurtle
+        "shape": "classic",  //todo
+        "pencolor" : "black",
+        "fillcolor" : "black",
+        "resizemode" : RawTurtle.RESIZEMODE.NORESIZE,
+        "visible" : true,
+        "language": "english",  //todo        // docstrings
+        "exampleturtle": "turtle",  //todo
+        "examplescreen": "screen",  //todo
+        "title": "Python Turtle Graphics",  //todo
+        "using_IDLE": false,  //todo
+        "_pensize": 1 // non-standard-option
+    }
+
+    __PEN
+
+    __mode = RawTurtle.DEFAULT_MODE;
+    __canvasindex
+    get __canvas() {
+        return RawTurtle.__canvasDirectory[this.__canvasindex];
+    }
+    set __canvas(canvas) {
+        RawTurtle.__canvasDirectory[this.__canvasindex] = canvas;
+    }
+    __undobuffersize;
+
+    __shown = RawTurtle._CFG.visible // : True/False
+    __pendown = true // : True/False
+    __pencolor = RawTurtle._CFG.pencolor // : color-string or color-tuple
+    __fillcolor = RawTurtle._CFG.fillcolor // : color-string or color-tuple
+    __pensize = RawTurtle._CFG._pensize // : positive number
+    __speed = 3 // : number in range 0..10
+    ___resizemode = RawTurtle._CFG.resizemode // : “auto” or “user” or “noresize” // todo: when this is set, re-calc the turtle
     static turtlePolygon = new Shape(
-        "polygon",
+        RawTurtle.shapetypepolygon,
         [[0,16], [-2,14], [-1,10], [-4,7],[-7,9], [-9,8], [-6,5], [-7,1], [-5,-3], [-8,-6],[-6,-8], [-4,-5], [0,-7], [4,-5], [6,-8], [8,-6],[5,-3], [7,1], [6,5], [9,8], [7,9], [4,7], [1,10],[2,14]],
-        { rotate: toRad(-90) }
+        SHAPE_90_DEG_ROTATE
     );
-    /*
-    TODO
-    "arrow" : Shape("polygon", ((-10,0), (10,0), (0,10))),
-    "turtle" : Shape("polygon", ((0,16), (-2,14), (-1,10), (-4,7),
-                (-7,9), (-9,8), (-6,5), (-7,1), (-5,-3), (-8,-6),
-                (-6,-8), (-4,-5), (0,-7), (4,-5), (6,-8), (8,-6),
-                (5,-3), (7,1), (6,5), (9,8), (7,9), (4,7), (1,10),
-                (2,14))),
-    "circle" : Shape("polygon", ((10,0), (9.51,3.09), (8.09,5.88),
-                (5.88,8.09), (3.09,9.51), (0,10), (-3.09,9.51),
-                (-5.88,8.09), (-8.09,5.88), (-9.51,3.09), (-10,0),
-                (-9.51,-3.09), (-8.09,-5.88), (-5.88,-8.09),
-                (-3.09,-9.51), (-0.00,-10.00), (3.09,-9.51),
-                (5.88,-8.09), (8.09,-5.88), (9.51,-3.09))),
-    "square" : Shape("polygon", ((10,-10), (10,10), (-10,10),
-                (-10,-10))),
-    "triangle" : Shape("polygon", ((10,-5.77), (0,11.55),
-                (-10,-5.77))),
-    "classic": Shape("polygon", ((0,0),(-5,-9),(0,-7),(5,-9))),
-    "blank" : Shape("image", self._blankimage())
+    static arrowPolygon = new Shape(
+        RawTurtle.shapetypepolygon,
+        [[-10, 0], [10, 0], [0, 10]],
+        SHAPE_90_DEG_ROTATE
+    )
+    static circlePolygon = new Shape(
+        RawTurtle.shapetypepolygon, [[10,0], [9.51,3.09], [8.09,5.88],
+        [5.88,8.09], [3.09,9.51], [0,10], [-3.09,9.51],
+        [-5.88,8.09], [-8.09,5.88], [-9.51,3.09], [-10,0],
+        [-9.51,-3.09], [-8.09,-5.88], [-5.88,-8.09],
+        [-3.09,-9.51], [-0.00,-10.00], [3.09,-9.51],
+        [5.88,-8.09], [8.09,-5.88], [9.51,-3.09]],
+        SHAPE_90_DEG_ROTATE
+    )
+    static squarePolygon = new Shape(
+        RawTurtle.shapetypepolygon,
+        [[10,-10], [10,10], [-10,10], [-10,-10]],
+        SHAPE_90_DEG_ROTATE
+    )
+    static trianglePolygon = new Shape(
+        RawTurtle.shapetypepolygon,
+        [[10,-5.77], [0,11.55], [-10,-5.77]],
+        SHAPE_90_DEG_ROTATE
+    )
+    static classicPolygon = new Shape(
+        RawTurtle.shapetypepolygon,
+        [[0,0],[-5,-9],[0,-7],[5,-9]],
+        SHAPE_90_DEG_ROTATE
+    )
+    static blankPolygon = new Shape(
+        Shape.types.BINARY,
+        new Uint8Array(),
+        SHAPE_WIDTH_HEIGHT_1
+    )
+    get __resizemode() {
+        return this.___resizemode;
     }
-    */
-    get #resizemode() {
-        return this.#_resizemode;
-    }
-    set #resizemode(value) {
-        this.#_resizemode = value;
-        switch(this.#_resizemode) {
+    set __resizemode(value) {
+        this.___resizemode = value;
+        switch(this.___resizemode) {
             case RawTurtle.RESIZEMODE.AUTO: {
                 this.modifyShape([], {
-                    shape: this.#PEN,
-                    rotate: toRad(this.#orient) + this.#tilt,
-                    scale: [this.#pensize, this.#pensize],
+                    shape: this.__PEN,
+                    rotate: toRad(this.__orient) + this.__tilt,
+                    scale: [this.__pensize, this.__pensize],
                     // skew: 
                     // todo: transform shape with tilt and shear
                 })
                 break;
             }
             case RawTurtle.RESIZEMODE.USER: {
-                // w = this.#outline
+                // w = this.__outline
                 this.modifyShape([], {
-                    shape: this.#PEN,
-                    rotate: toRad(this.#orient),
-                    scale: this.#stretchfactor,
+                    shape: this.__PEN,
+                    rotate: toRad(this.__orient),
+                    scale: this.__stretchfactor,
                     // skew: 
                     // todo: transform shape with tilt and shear
                 })
@@ -505,8 +285,8 @@ class RawTurtle {
             case RawTurtle.RESIZEMODE.NORESIZE: {
                 // w = 1
                 this.modifyShape([], {
-                    shape: this.#PEN,
-                    rotate: toRad(this.#orient),
+                    shape: this.__PEN,
+                    rotate: toRad(this.__orient),
                     scale: [1, 1],
                     // skew: 
                     // todo: transform shape with tilt and shear
@@ -515,123 +295,130 @@ class RawTurtle {
             }
         }
     }
-    #stretchfactor = [1, 1] // : (positive number, positive number)
-    #outline // : positive number
-    #tilt = 0 // : number
-    #shear = 0
+    __stretchfactor = [1, 1] // : (positive number, positive number)
+    __outline // : positive number
+    __tilt = 0 // : number
+    __shear = 0
 
-    #fill = false;
+    __fill = false;
 
-    #colormode = 255;
+    __colormode = RawTurtle._CFG.colormode;
 
-    #_x;
-    #_y;
-    get #x() {
-        return this.#_x;
+    ___x;
+    ___y;
+    get __x() {
+        return this.___x;
     }
-    set #x(x) {
-        this.#_x = x;
+    set __x(x) {
+        this.___x = x;
     }
-    get #y() {
-        return this.#_y;
+    get __y() {
+        return this.___y;
     }
-    set #y(y) {
-        this.#_y = y;
+    set __y(y) {
+        this.___y = y;
     }
-    #_turtleshape
-    get #turtleshape() {
-        return this.#_turtleshape;
+    ___turtleshape
+    get __turtleshape() {
+        return this.___turtleshape;
     }
-    set #turtleshape(name) {
-        this.#_turtleshape = name;
-        // this.#canvas.drawShape([this.#x, this.#y], { shape: this.#_turtleshape, rotate: this.#orient.valueOf() })
-    }
-    #tracer;
-    #delay;
-    #motion(fn) {
-        const speed = this.#speed, tracer = this.#tracer, delay = this.#delay;
-        this.#speed = this.#tracer = this.#delay = 0;
-        fn();
-        this.#speed = speed, this.#tracer = tracer, this.#delay = delay;
-    }
-    
-    #pos() {
-        const obj = [this.#x, this.#y];
-        obj.x = this.#x;
-        obj.y = this.#y;
-        return obj;
-    }
-    #move(fn) {
-        // draw in here
-        const before = this.#pos();
-        fn();
-        const after = this.#pos();
-        if(this.#pendown) {
-            this.#canvas.line(this.convertTurtleCoordinate(before), this.convertTurtleCoordinate(after), {
-                color: this.#pencolor,
-                width: this.#pensize
-            });
-        }
-        this.#canvas.drawShape(this.convertTurtleCoordinate(this.#pos()), {
-            shape: this.#PEN,
-            rotate: toRad(this.#orient)
+    set __turtleshape(name) {
+        this.___turtleshape = name;
+        this.__canvas.modifyShape([], {
+            shape: this.__PEN,
+            appearance: RawTurtle.buildAppearanceKey(this.__PEN, name),
         });
     }
-    #_orient = 0
-    get #orient() {
-        return this.#_orient;
+    __tracer
+    __delay = RawTurtle._CFG.delay;
+    __motion(fn) {
+        const speed = this.__speed, tracer = this.__tracer, delay = this.__delay;
+        this.__speed = this.__tracer = this.__delay = 0;
+        fn();
+        this.__speed = speed, this.__tracer = tracer, this.__delay = delay;
     }
-    set #orient(orient) {
+    
+    __pos() {
+        const obj = [this.__x, this.__y];
+        obj.x = this.__x;
+        obj.y = this.__y;
+        return obj;
+    }
+    __move(fn) {
+        // draw in here
+        const before = this.__pos();
+        fn();
+        const after = this.__pos();
+        if(this.__pendown) {
+            this.__canvas.line(this.convertTurtleCoordinate(before), this.convertTurtleCoordinate(after), {
+                color: this.__pencolor,
+                width: this.__pensize
+            });
+        }
+        if(this.__recordpoly) {
+            this.__polyrecord.push([this.__x, this.__y]);
+        }
+        this.__canvas.drawShape(this.convertTurtleCoordinate(this.__pos()), {
+            shape: this.__PEN,
+            rotate: toRad(this.__orient)
+        });
+    }
+    ___orient = 0
+    get __orient() {
+        return this.___orient;
+    }
+    set __orient(orient) {
         if(orient instanceof Vec2D) {
-            this.#_orient = toDeg(orient.valueOf());
+            this.___orient = toDeg(orient.valueOf());
         } else {
-            this.#_orient = orient;
+            this.___orient = orient;
         }
     }
-    #anglemode = RawTurtle.#MODE_DEGREEE; // RawTurtle.#MODE_DEGREEE RawTurtle.#MODE_RADIANS
+    __anglemode = RawTurtle.__MODE_DEGREEE; // RawTurtle.__MODE_DEGREEE RawTurtle.__MODE_RADIANS
     get orient() {
-        if(this.#anglemode === RawTurtle.#MODE_DEGREEE) {
-            return this.#orient;
+        if(this.__anglemode === RawTurtle.__MODE_DEGREEE) {
+            return this.__orient;
         } else {
-            return toRad(this.#orient);
+            return toRad(this.__orient);
         }
     }
     set orient(angle) {
-        if(this.#anglemode === RawTurtle.#MODE_DEGREEE) {
-            this.#orient = normalize(angle);
+        if(this.__anglemode === RawTurtle.__MODE_DEGREEE) {
+            this.__orient = normalize(angle);
         } else {
-            this.#orient = normalize(toRad(angle));
+            this.__orient = normalize(toRad(angle));
         }
     }
-    get #fullcircle() {
-        return this.#anglemode === RawTurtle.#MODE_DEGREEE ? 360 : PI_2;
+    get __fullcircle() {
+        return this.__anglemode === RawTurtle.__MODE_DEGREEE ? 360 : PI_2;
     }
-    get #degreesPerAU() {
-        return 360 / this.#fullcircle;
+    get __degreesPerAU() {
+        return 360 / this.__fullcircle;
     }
-    get #angleOffset() {
+    get __angleOffset() {
         return {
             [RawTurtle.MODES.STANDARD]: 0,
             [RawTurtle.MODES.WORLD]   : 0,
-            [RawTurtle.MODES.LOGO]    : this.#fullcircle / 4
-        }[this.#mode ?? RawTurtle.DEFAULT_MODE];
+            [RawTurtle.MODES.LOGO]    : this.__fullcircle / 4
+        }[this.__mode ?? RawTurtle.DEFAULT_MODE];
     }
-    get #angleOrient () {
+    get __angleOrient () {
         return {
             [RawTurtle.MODES.STANDARD]: 1,
             [RawTurtle.MODES.WORLD]   : 1,
             [RawTurtle.MODES.LOGO]    : -1
-        }[this.#mode ?? RawTurtle.DEFAULT_MODE]
+        }[this.__mode ?? RawTurtle.DEFAULT_MODE]
     }
     setundobuffer(buffer) {
-        this.#undobuffer = buffer;
+        this.__undobuffersize = buffer;
+        this.__undobuffer.prune();
     }
     forward(distance) {
-        this.#move(() => {
+        this.__move(() => {
             // cos(angle) = x / distance
-            this.#x += Math.cos(toRad(this.#orient)) * distance;
+            this.__x += Math.cos(toRad(this.__orient)) * distance;
             // sin(angle) = y / distance
-            this.#y -= Math.sin(toRad(this.#orient)) * distance;
+            this.__y -= Math.sin(toRad(this.__orient)) * distance;
         });
     }
     fd(distance) {
@@ -647,11 +434,11 @@ class RawTurtle {
         this.forward(-distance)
     }
     left(angle) {
-        this.#move(() => {
-            if(this.#anglemode === RawTurtle.#MODE_DEGREEE) {
-                this.#orient = normalize(this.#orient - angle);
+        this.__move(() => {
+            if(this.__anglemode === RawTurtle.__MODE_DEGREEE) {
+                this.__orient = normalize(normalize(this.__orient) - normalize(angle));
             } else {
-                this.#orient = normalize(this.#orient - toRad(angle));
+                this.__orient = normalize(this.__orient - toRad(angle));
             }
         });
     }
@@ -666,9 +453,9 @@ class RawTurtle {
     }
     goto(x, y) {
         const [x1, y1] = Vec2D.normalizeArgs(x, y);
-        this.#move(() => {
-            this.#x = x1;
-            this.#y = y1;
+        this.__move(() => {
+            this.__x = x1;
+            this.__y = y1;
         });
     }
     setpos(x, y) {
@@ -678,17 +465,17 @@ class RawTurtle {
         this.goto(x,y);
     }
     setx(x) {
-        this.#move(() => {
-            this.#x = x;
+        this.__move(() => {
+            this.__x = x;
         });
     }
     sety(y) {
-        this.#move(() => {
-            this.#y = y;
+        this.__move(() => {
+            this.__y = y;
         });
     }
     setheading(angle) {
-        this.#move(() => {
+        this.__move(() => {
             this.orient = angle;
         })
     }
@@ -696,23 +483,23 @@ class RawTurtle {
         this.setheading(angle);
     }
     home() {
-        this.#move(() => {
-            this.#x = 0;
-            this.#y = 0;
+        this.__move(() => {
+            this.__x = 0;
+            this.__y = 0;
             this.orient = 0;
         });
     }
     circle(radius, extent = null, steps = null) {
-        extent ??= this.#fullcircle;
-        steps ??= 1 + parseInt(Math.min(11+Math.abs(radius) / 6.0, 59.0) * Math.abs(extent) / this.#fullcircle);
+        extent ??= this.__fullcircle;
+        steps ??= 1 + parseInt(Math.min(11+Math.abs(radius) / 6.0, 59.0) * Math.abs(extent) / this.__fullcircle);
         let w = 1.0 * extent / steps;
         let w2 = 0.5 * w;
-        let l = 2.0 * radius * Math.sin(Math.radians(w2)*this.#degreesPerAU);
+        let l = 2.0 * radius * Math.sin(Math.radians(w2)*this.__degreesPerAU);
         if(radius < 0) {
             l = -l, w = -w, w2 = -w2;
         }
         for(let i = 0; i < steps; i++) {
-            this.#motion(() => {
+            this.__motion(() => {
                 this.orient = toDeg(toRad(this.orient) * w2);
             });
             this.forward(l);
@@ -723,82 +510,83 @@ class RawTurtle {
         if(!color) {
             if(typeof size === 'string') {
                 color = size;
-                size = this.#pensize + Math.max(this.#pensize, 4);
+                size = this.__pensize + Math.max(this.__pensize, 4);
             } else {
-                color = this.#pencolor;
-                size ??= this.#pensize + Math.max(this.#pensize, 4);
+                color = this.__pencolor;
+                size ??= this.__pensize + Math.max(this.__pensize, 4);
             }
                 
         } else {
-            size ??= this.#pensize + Math.max(this.#pensize, 4);
+            size ??= this.__pensize + Math.max(this.__pensize, 4);
         }
         // overload end
-        this.#canvas.circle(this.convertTurtleCoordinate(this.#pos()), {
+        this.__canvas.circle(this.convertTurtleCoordinate(this.__pos()), {
             radius: size / 2,
             color,
             fill: true
         });
 
     }
-    #turtlestamps = [];
+    __turtlestamps = [];
     stamp() {
-        const id = this.#canvas.drawShape(this.convertTurtleCoordinate(this.#pos()), {
-            shape: this.#turtleshape,
-            rotate: toRad(this.#orient)
+        const id = this.__canvas.drawShape(this.convertTurtleCoordinate(this.__pos()), {
+            shape: this.__turtleshape, // todo: clone!!
+            rotate: toRad(this.__orient)
         });
-        this.#turtlestamps.push(id);
+        this.__turtlestamps.push(id);
         return id;
     }
     clearstamp(id) {
-        this.#turtlestamps.splice(this.#turtlestamps.indexOf(id), 1);
-        this.#canvas.removeShape(id);
+        this.__turtlestamps.splice(this.__turtlestamps.indexOf(id), 1);
+        this.__canvas.removeShape(id);
     }
     clearstamps(n) {
-        const deletedElements = this.#turtlestamps.splice(n < 0 ? n : 0, n);
+        const deletedElements = this.__turtlestamps.splice(n < 0 ? n : 0, n);
         deletedElements.forEach(id => {
-            this.#canvas.removeShape(id);
+            this.__canvas.removeShape(id);
         })
     }
     undo(n) {
         // todo
     }
     speed(n) {
-        // todo
+        if(n === undefined) return this.__speed;
+        this.__speed = n;
     }
     position() {
-        return new Vec2D(this.#pos());
+        return new Vec2D(this.__pos());
     }
     pos() {
         return this.position();
     }
     towards(x0, y0) {
         const [x1, y1] = normalizeArgs(x0, y0);
-        const x = this.#x - x1, y = this.#y - y2;
+        const x = this.__x - x1, y = this.__y - y2;
         let result = Math.degrees(Math.atan2(y, x)) % 360.0;
-        result /= this.#degreesPerAU;
-        return (this.#angleOffset + this.#angleOrient * result) % this.#fullcircle;
+        result /= this.__degreesPerAU;
+        return (this.__angleOffset + this.__angleOrient * result) % this.__fullcircle;
     }
     xcor() {
-        return this.#x;
+        return this.__x;
     }
     ycor() {
-        return this.#y;
+        return this.__y;
     }
     heading() {
         return this.orient;
     }
     distance(x0, y0) {
         const [x, y] = normalizeArgs(x0, y0);
-        return new Vec2D([x, y]).substract(this.#pos()).abs();
+        return new Vec2D([x, y]).substract(this.__pos()).abs();
     }
     degrees() {
-        this.#anglemode = RawTurtle.#MODE_DEGREEE;
+        this.__anglemode = RawTurtle.__MODE_DEGREEE;
     }
     radians() {
-        this.#anglemode = RawTurtle.#MODE_RADIANS;
+        this.__anglemode = RawTurtle.__MODE_RADIANS;
     }
     pendown() {
-        this.#pendown = true;
+        this.__pendown = true;
     }
     pd() {
         this.pendown();
@@ -807,7 +595,7 @@ class RawTurtle {
         this.pendown();
     }
     penup() {
-        this.#pendown = false;
+        this.__pendown = false;
     }
     pu() {
         this.penup();
@@ -816,8 +604,8 @@ class RawTurtle {
         this.penup();
     }
     pensize(width) {
-        if(!width) return this.#pensize;
-        this.#pensize = width;
+        if(width === undefined) return this.__pensize;
+        this.__pensize = width;
     }
     width(...args) {
         return this.pensize(...args);
@@ -836,58 +624,58 @@ class RawTurtle {
                 outline,
                 tilt,
             } = dict;
-            if(shown !== undefined) this.#shown = shown;
-            if(pendown !== undefined) this.#pendown = pendown;
-            if(pencolor !== undefined) this.#pencolor = pencolor;
-            if(fillcolor !== undefined) this.#fillcolor = fillcolor;
-            if(pensize !== undefined) this.#pensize = pensize;
-            if(speed !== undefined) this.#speed = speed;
-            if(resizemode !== undefined) this.#resizemode = resizemode;
-            if(stretchfactor !== undefined) this.#stretchfactor = stretchfactor;
-            if(outline !== undefined) this.#outline = outline;
-            if(tilt !== undefined) this.#tilt = tilt;
+            if(shown !== undefined) this.__shown = shown;
+            if(pendown !== undefined) this.__pendown = pendown;
+            if(pencolor !== undefined) this.__pencolor = pencolor;
+            if(fillcolor !== undefined) this.__fillcolor = fillcolor;
+            if(pensize !== undefined) this.__pensize = pensize;
+            if(speed !== undefined) this.__speed = speed;
+            if(resizemode !== undefined) this.__resizemode = resizemode;
+            if(stretchfactor !== undefined) this.__stretchfactor = stretchfactor;
+            if(outline !== undefined) this.__outline = outline;
+            if(tilt !== undefined) this.__tilt = tilt;
             return this;
         }, this);
         return {
-            shown: this.#shown,
-            pendown: this.#pendown,
-            pencolor: this.#pencolor,
-            fillcolor: this.#fillcolor,
-            pensize: this.#pensize,
-            speed: this.#speed,
-            resizemode: this.#resizemode,
-            stretchfactor: this.#stretchfactor,
-            outline: this.#outline,
-            tilt: this.#tilt,
+            shown: this.__shown,
+            pendown: this.__pendown,
+            pencolor: this.__pencolor,
+            fillcolor: this.__fillcolor,
+            pensize: this.__pensize,
+            speed: this.__speed,
+            resizemode: this.__resizemode,
+            stretchfactor: this.__stretchfactor,
+            outline: this.__outline,
+            tilt: this.__tilt,
         }
     }
     isdown() {
-        return this.#pendown
+        return this.__pendown
     }
-    #convertColorTo255(r, g, b) {
-        if(this.#colormode === 255) {
+    __convertColorTo255(r, g, b) {
+        if(this.__colormode === 255) {
             return `rgb(${(Array.isArray(r) ? r : [r, g, b]).join(', ')})`;
         }
-        if(this.#colormode === 1) {
+        if(this.__colormode === 1) {
             return `rgb(${(Array.isArray(r) ? r : [r, g, b]).map((percent) => parseInt(percent * 255)).join(', ')})`;
         }
     }
     pencolor(r, g, b) {
-        if(!r) return this.#pencolor;
-        this.#pencolor = typeof r === 'string' ? r : this.#convertColorTo255(r, g, b);
+        if(r === undefined) return this.__pencolor;
+        this.__pencolor = typeof r === 'string' ? r : this.__convertColorTo255(r, g, b);
     }
     fillcolor(r, g, b) {
-        if(!r) return this.#fillcolor;
-        this.#fillcolor = typeof r === 'string' ? r : this.#convertColorTo255(r, g, b);
+        if(r === undefined) return this.__fillcolor;
+        this.__fillcolor = typeof r === 'string' ? r : this.__convertColorTo255(r, g, b);
     }
     color(r, g, b) {
-        if(!r) {
+        if(r === undefined) {
             return [
                 this.pencolor(),
                 this.fillcolor(),
             ]
         }
-        if(!b) {
+        if(b === undefined) {
             this.pencolor(r);
             this.fillcolor(g);
         }
@@ -898,93 +686,109 @@ class RawTurtle {
     }
     
     filling() {
-        return this.#fill;
+        return this.__fill;
     }
     begin_fill() {
-        this.#fill = true;
+        this.__fill = true;
     }
     end_fill() {
-        this.#fill = false;
+        this.__fill = false;
     }
     reset() {
-        this.#x = 0;
-        this.#y = 0
-        // todo
+        this.__move(() => {
+            this.__x = 0;
+            this.__y = 0
+            this.__pensize = RawTurtle._CFG._pensize
+            this.__shown = RawTurtle._CFG.visible
+            this.__pencolor = RawTurtle._CFG.pencolor
+            this.__fillcolor = RawTurtle._CFG.fillcolor
+            this.__pendown = true
+            this.__speed = 3
+            this.__stretchfactor = [1, 1]
+            this.__shear = 0
+            this.__tilt = 0
+            this.__shapetrafo = [1, 0, 0, 1]
+            this.__outline = 1
+            this.__eventlisteners = RawTurtle.__EVENTLISTENERS_EMPTY;
+            this.__delay = RawTurtle._CFG.delay;
+            this.__tracer = undefined;
+        });
+        this.__canvas.clear();
     }
     clear() {
-        this.#canvas.clear();
+        this.__canvas.clear();
     }
     write(arg, move = false, align = 'left', font = ['Arial', 8, 'normal']) {
-        const { w, h } = this.#canvas.write(this.convertTurtleCoordinate([this.#x, this.#y]), {
+        const { w, h } = this.__canvas.write(this.convertTurtleCoordinate([this.__x, this.__y]), {
             arg, move, alig, font
         });
         if(move) {
-            this.#x += this.canvasToTurtle(w, h).w;
+            this.__x += this.canvasToTurtle(w, h).w;
         }
     }
     showturtle() {
-        this.#shown = true;
+        this.__shown = true;
     }
     st() {
         this.showturtle()
     }
     hideturtle() {
-        this.#shown = false;
+        this.__shown = false;
     }
     ht() {
         this.hideturtle();
     }
     isvisible() {
-        return this.#shown;
+        return this.__shown;
     }
     shape(name) {
-        if(!name) {
-            return this.#turtleshape;
+        if(name === undefined) {
+            return this.__turtleshape;
         }
-        this.#turtleshape = name;
+        this.__turtleshape = name;
     }
     resizemode(mode) {
-        if(!mode) return this.#resizemode;
-        this.#resizemode = mode;
+        if(mode === undefined) return this.__resizemode;
+        this.__resizemode = mode;
     }
     shapesize(stretch_wid, stretch_len, outline) {
         if(stretch_wid === undefined && stretch_len === undefined &&  outline === undefined) {
-            return [...this.#stretchfactor, this.#outline]
+            return [...this.__stretchfactor, this.__outline]
         }
         if(stretch_wid === 0 || stretch_len === 0) {
             throw new Error("stretch_wid/stretch_len must not be zero");
         }
-        this.#stretchfactor = [stretch_wid ?? this.#stretchfactor[0], stretch_len ?? stretch_wid ?? this.#stretchfactor[1]];
-        this.#outline = outline ?? this.#outline;
-        this.#resizemode(RawTurtle.RESIZEMODE.USER);
+        this.__stretchfactor = [stretch_wid ?? this.__stretchfactor[0], stretch_len ?? stretch_wid ?? this.__stretchfactor[1]];
+        this.__outline = outline ?? this.__outline;
+        this.__resizemode(RawTurtle.RESIZEMODE.USER);
     }
     turtlesize(stretch_wid, stretch_len, outline) {
         return shapesize(stretch_wid, stretch_len, outline)
     }
     shearfactor(shear) {
-        if(!shear) return this.#shear;
-        this.#shear = shear;
-        this.#resizemode(RawTurtle.RESIZEMODE.USER);
+        if(shear === undefined) return this.__shear;
+        this.__shear = shear;
+        this.__resizemode(RawTurtle.RESIZEMODE.USER);
     }
     settiltangle(tilt) {
-        this.#tilt += tilt;
-        this.#resizemode(RawTurtle.RESIZEMODE.USER);
+        this.__tilt += tilt;
+        this.__resizemode(RawTurtle.RESIZEMODE.USER);
     }
     tilt(tilt) {
-        this.#tilt = tilt;
-        this.#resizemode(RawTurtle.RESIZEMODE.USER);
+        this.__tilt = tilt;
+        this.__resizemode(RawTurtle.RESIZEMODE.USER);
     }
     tiltangle(tilt) {
-        if(!tilt) return this.#tilt;
-        this.#tilt = tilt;
-        this.#resizemode(RawTurtle.RESIZEMODE.USER);
+        if(tilt === undefined) return this.__tilt;
+        this.__tilt = tilt;
+        this.__resizemode(RawTurtle.RESIZEMODE.USER);
     }
-    #shapetrafo = [1, 1, 1, 1]
+    __shapetrafo = [1, 0, 0, 1]
     shapetransform(t11, t12, t21, t22) {
         if([t11, t12, t21, t22].every(i => i === undefined)) {
-            return this.#shapetrafo;
+            return this.__shapetrafo;
         }
-        let [m11, m12, m21, m22] = this.#shapetrafo;
+        let [m11, m12, m21, m22] = this.__shapetrafo;
         m11 = t11 ?? m11;
         m12 = t12 ?? m12;
         m21 = t21 ?? m21;
@@ -992,91 +796,50 @@ class RawTurtle {
         if(m11 * m22 - m12 * m21 === 0) {
             throw new Error("Bad shape transform matrix: must not be singular");
         }
-        this.#shapetrafo = [m11, m12, m21, m22]
+        this.__shapetrafo = [m11, m12, m21, m22]
         const alfa = Math.atan2(-m21, m11) % PI_2;
         const sa = Math.sin(alfa), ca = Math.cos(alfa);
         const [a11, a12, a21, a22] = [ca*m11 - sa*m21, ca*m12 - sa*m22,
                                         sa*m11 + ca*m21, sa*m12 + ca*m22];
-        this.#stretchfactor = [a11, a22];
-        this.#shear = a12/a22;
-        this.#tilt = alfa;
-        this.#resizemode(RawTurtle.RESIZEMODE.USER);
+        this.__stretchfactor = [a11, a22];
+        this.__shear = a12/a22;
+        this.__tilt = alfa;
+        this.__resizemode(RawTurtle.RESIZEMODE.USER);
     }
     get_shapepoly() {
-        return RawTurtle[`${this.#turtleshape}Polygon`].data;
-    }
-    #eventlisteners = {
-        click: {},
-        release: {},
-        drag: {},
-    };
-    onclick(fun, btn = 1, add = null) {
-        if(fun === null) { // fun === null -> remove event listeners
-            this.#eventlisteners.click = {};
-        }
-        if(add !== true) { // add === true -> add new listener, else replace
-            this.#eventlisteners.click = {};
-        }
-        if(typeof fun === 'function') {
-            this.#eventlisteners.click[`button${btn}`] ??= [];
-            this.#eventlisteners.click[`button${btn}`].push(fun);
-        }
-    }
-    onrelease() {
-        if(fun === null) { // fun === null -> remove event listeners
-            this.#eventlisteners.release = {};
-        }
-        if(add !== true) { // add === true -> add new listener, else replace
-            this.#eventlisteners.release = {};
-        }
-        if(typeof fun === 'function') {
-            this.#eventlisteners.release[`button${btn}`] ??= [];
-            this.#eventlisteners.release[`button${btn}`].push(fun);
-        }
-    }
-    ondrag() {
-        if(fun === null) { // fun === null -> remove event listeners
-            this.#eventlisteners.drag = {};
-        }
-        if(add !== true) { // add === true -> add new listener, else replace
-            this.#eventlisteners.drag = {};
-        }
-        if(typeof fun === 'function') {
-            this.#eventlisteners.drag[`button${btn}`] ??= [];
-            this.#eventlisteners.drag[`button${btn}`].push(fun);
-        }
+        return RawTurtle[`${this.__turtleshape}Polygon`].data;
     }
     mode(mode) {
-        if(!mode) {
-            return this.#mode;    
+        if(mode === undefined) {
+            return this.__mode;    
         }
-        this.#mode = mode;
+        this.__mode = mode;
         // todo: implement implications!
     }
-    #llx = -100;
-    #lly = -100;
-    #urx =  100;
-    #ury =  100;
+    __llx = -100;
+    __lly = -100;
+    __urx =  100;
+    __ury =  100;
     setworldcoordinates(llx, lly, urx, ury) {
         if(this.mode() !== RawTurtle.MODES.WORLD) {
             this.mode(RawTurtle.MODES.WORLD);
         }
-        this.#llx = llx;
-        this.#lly = lly;
-        this.#urx = urx;
-        this.#ury = ury;
+        this.__llx = llx;
+        this.__lly = lly;
+        this.__urx = urx;
+        this.__ury = ury;
     }
     convertTurtleCoordinate(xx, yy) {
         const objx = normalizeArgs(xx, yy);
         const [x, y] = objx;
-        const x0 = this.#llx;
-        const y0 = this.#lly;
-        const x1 = this.#urx;
-        const y1 = this.#ury;
+        const x0 = this.__llx;
+        const y0 = this.__lly;
+        const x1 = this.__urx;
+        const y1 = this.__ury;
         const widthX = x1 - x0;
         const widthY = y1 - y0;
-        const w = this.#canvas.width;
-        const h = this.#canvas.height;
+        const w = this.__canvas.width;
+        const h = this.__canvas.height;
 
         /*
         x | x*
@@ -1095,7 +858,7 @@ class RawTurtle {
         */
 
         
-        const x0y0 = this.#canvas.x0y0;
+        const x0y0 = this.__canvas.x0y0;
         const [TB, LR] = x0y0.split("");
         const flipped = (f1, f2, isFlipped) => isFlipped ? f1 + f2 : f1 - f2;
         const xn = flipped(w / (x1 - x0) * x, w / (x1 - x0) * x0, LR === "R");
@@ -1109,16 +872,16 @@ class RawTurtle {
     convertCanvasCoordinate(xx, yy) {
         const [x, py] = normalizeArgs(xx, yy);
         const y = -py;
-        const x0 = this.#llx;
-        const y0 = this.#lly;
-        const x1 = this.#urx;
-        const y1 = this.#ury;
+        const x0 = this.__llx;
+        const y0 = this.__lly;
+        const x1 = this.__urx;
+        const y1 = this.__ury;
         const widthX = x1 - x0;
         const widthY = y1 - y0;
-        const w = this.#canvas.width;
-        const h = this.#canvas.height;
+        const w = this.__canvas.width;
+        const h = this.__canvas.height;
 
-        const x0y0 = this.#canvas.x0y0;
+        const x0y0 = this.__canvas.x0y0;
         const [TB, LR] = x0y0.split("");
         
         // xn = w / (x1 - x0) * x - w / (x1 - x0) * x0
@@ -1134,10 +897,10 @@ class RawTurtle {
         return obj;
     }
     turtleToCanvas(dx, dy) {
-        const wt = this.#urx - this.#llx;
-        const ht =  this.#ury - this.#lly;
-        const w = this.#canvas.width;
-        const h = this.#canvas.height;
+        const wt = this.__urx - this.__llx;
+        const ht =  this.__ury - this.__lly;
+        const w = this.__canvas.width;
+        const h = this.__canvas.height;
         const xn = dx / wt * w;
         const yn = dy / ht * h;
         const obj = [xn, yn];
@@ -1146,10 +909,10 @@ class RawTurtle {
         return obj; 
     }
     canvasToTurtle(dx, dy) {
-        const wt = this.#urx - this.#llx;
-        const ht =  this.#ury - this.#lly;
-        const w = this.#canvas.width;
-        const h = this.#canvas.height;
+        const wt = this.__urx - this.__llx;
+        const ht =  this.__ury - this.__lly;
+        const w = this.__canvas.width;
+        const h = this.__canvas.height;
         const xn = dx * wt / w;
         const yn = dy * ht / h;
         const obj = [xn, yn];
@@ -1157,128 +920,527 @@ class RawTurtle {
         obj.y = obj.h = yn;
         return obj; 
     }
-
-}
-
-
-
-
-/*
-Special Turtle methods
-begin_poly()
-end_poly()
-get_poly()
-clone()
-getturtle() | getpen()
-getscreen()
-setundobuffer()
-undobufferentries()
-*/
-
-/*
-Methods of TurtleScreen/Screen
-Window control
-bgcolor()
-bgpic()
-clearscreen()
-resetscreen()
-screensize()
-setworldcoordinates()
-*/
-
-/*
-Animation control
-delay()
-tracer()
-update()
-*/
-
-/*
-Using screen events
-listen()
-onkey() | onkeyrelease()
-onkeypress()
-onclick() | onscreenclick()
-ontimer()
-mainloop() | done()
-*/
-
-/*
-Settings and special methods
-mode()
-colormode()
-getcanvas()
-getshapes()
-register_shape() | addshape()
-turtles()
-window_height()
-window_width()
-Input methods
-textinput()
-numinput()
-Methods specific to Screen
-bye()
-exitonclick()
-setup()
-title()
-*/
-
-class Turtle extends RawTurtle {
-    constructor({ renderInto }) {
-        super(PixiCanvas.defaultCanvas, renderInto);
-        this.setundobuffer(1000);
+    log(...args) {
+        console.log(...args)
     }
-    
+    __recordpoly = false;
+    __polyrecord;
+    begin_poly() {
+        this.__polyrecord = [[this.__x, this.__y]];
+        this.__recordpoly = true;
+    }
+    end_poly() {
+        this.__polyrecord.push([...this.__polyrecord[0]]);
+        this.__recordpoly = false;
+    }
+    get_poly() {
+        return new Shape(RawTurtle.shapetypepolygon, this.__polyrecord);
+    }
+    clone() {
+        const undobuf = this.__undobuffer;
+        this.__undobuffer = Object.entries(undobuf);
+        const cloned = structuredClone(this);
+        this.__undobuffer = undobuf;
+        cloned.___orient = new Vec2D(cloned.___orient)
+        const q = Object.assign(Object.create(Object.getPrototypeOf(this)), cloned);
+        cloned.__undobuffer = undobuffer(cloned.__undobuffer, q);
+        q.__regsiterCanvas();
+        q.__registerNewTurtle();
+        RawTurtle.#turtles.add(new WeakRef(q));
+        return q;
+    }
+    getscreen() {
+        return new Proxy(this.__canvas, {
+            get: function(target, property) {
+                if (property in target) {
+                    return target[property];
+                } else {
+                    throw new ReferenceError("Property \"" + property + "\" does not exist.");
+                }
+            },
+            set: function(target, property, value) {
+                if (property in target) {
+                    target[property] = value;
+                } else {
+                    throw new ReferenceError("Property \"" + property + "\" does not exist.");
+                }
+            }
+        });
+    }
+    undobufferentries() {
+        return Object.entries(this.__undobuffer);
+    }
+    bgcolor(color) {
+        this.__canvas.bgcolor(color);
+    }
+    bgpic(picname) {
+        this.__canvas.bgpic(
+            picname
+                .replaceAll('%x', this.__canvas.width)
+                .replaceAll('%y', this.__canvas.height)
+        );
+    }
+    clearscreen({ deep = true } = {}) {
+        this.__canvas.bgpic(null);
+        this.__canvas.bgcolor("white");
+        this.reset();
+        if(deep) {
+            for(const ref of RawTurtle.#turtles) {
+                const turtle = ref.deref();
+                if(!turtle) {
+                    RawTurtle.#turtles.delete(ref);
+                    continue;
+                }
+                if(turtle === this) {
+                    continue;
+                }
+                turtle.clearscreen({ deep: false });
+            }
+        }
+    }
+    resetscreen({ deep = true } = {}) {
+        this.reset();
+        if(deep) {
+            for(const ref of RawTurtle.#turtles) {
+                const turtle = ref.deref();
+                if(!turtle) {
+                    RawTurtle.#turtles.delete(turtle);
+                    continue;
+                }
+                if(turtle === this) {
+                    continue;
+                }
+                turtle.resetscreen({ deep: false });
+            }
+        }
+    }
+    screensize(width, height, color) {
+        if(width == null && height == null && color == null) {
+            return [this.__canvas.width, this.__canvas.height];
+        }
+        if(width != null) this.__canvas.width = width;
+        if(height != null) this.__canvas.height = height;
+        if(color != null) this.bgcolor(color);
+    }
+    setworldcoordinates(llx, lly, urx, ury) {
+        this.llx = llx;
+        this.lly = lly;
+        this.urx = urx;
+        this.ury = ury;
+        this.mode(RawTurtle.MODES.WORLD);
+        // todo: redraw
+    }
+    update() {
+        // todo;
+        // used with tracer
+    }
+    listen() {
+        console.warn("This method does nothing - it's only provided for compatability. Events are always listened to!")
+    }
+    // todo: differentiate between turtle and turtleScreen
+    static __EVENTLISTENERS_EMPTY =  {
+        click: {},
+        release: {},
+        drag: {},
+        keyup: {},
+        keydown: {},
+        
+    };
+    __eventlisteners = RawTurtle.__EVENTLISTENERS_EMPTY;
+    /*
+    This TurtleScreen method is available as a global function only under the name onscreenclick. 
+    The global function onclick is another one derived from the Turtle method onclick.
+    */
+    onclick(fun, btn = 1, add = null) {
+        if(fun === null) { // fun === null -> remove event listeners
+            this.__eventlisteners.click = {};
+        }
+        if(add !== true) { // add === true -> add new listener, else replace
+            this.__eventlisteners.click = {};
+        }
+        if(typeof fun === 'function') {
+            this.__eventlisteners.click[`button${btn}`] ??= [];
+            this.__eventlisteners.click[`button${btn}`].push(fun);
+        }
+    }
+    onrelease(fun, btn = 1, add = null) {
+        if(fun === null) { // fun === null -> remove event listeners
+            this.__eventlisteners.release = {};
+        }
+        if(add !== true) { // add === true -> add new listener, else replace
+            this.__eventlisteners.release = {};
+        }
+        if(typeof fun === 'function') {
+            this.__eventlisteners.release[`button${btn}`] ??= [];
+            this.__eventlisteners.release[`button${btn}`].push(fun);
+        }
+    }
+    ondrag(fun, btn = 1, add = null) {
+        if(fun === null) { // fun === null -> remove event listeners
+            this.__eventlisteners.drag = {};
+        }
+        if(add !== true) { // add === true -> add new listener, else replace
+            this.__eventlisteners.drag = {};
+        }
+        if(typeof fun === 'function') {
+            this.__eventlisteners.drag[`button${btn}`] ??= [];
+            this.__eventlisteners.drag[`button${btn}`].push(fun);
+        }
+    }
+    onkey(fun, btn = 1, add = null) {
+        if(fun === null) { // fun === null -> remove event listeners
+            this.__eventlisteners.keyup = {};
+        }
+        if(add !== true) { // add === true -> add new listener, else replace
+            this.__eventlisteners.keyup = {};
+        }
+        if(typeof fun === 'function') {
+            this.__eventlisteners.keyup[`button${btn}`] ??= [];
+            this.__eventlisteners.keyup[`button${btn}`].push(fun);
+        }
+    }
+    onkeyrelease(fun, btn = 1, add = null) {
+        onkey(fun, btn, add)
+    }
+    onkeypress(fun, btn = 1, add = null) {
+        if(fun === null) { // fun === null -> remove event listeners
+            this.__eventlisteners.keydown = {};
+        }
+        if(add !== true) { // add === true -> add new listener, else replace
+            this.__eventlisteners.keydown = {};
+        }
+        if(typeof fun === 'function') {
+            this.__eventlisteners.keydown[`button${btn}`] ??= [];
+            this.__eventlisteners.keydown[`button${btn}`].push(fun);
+        }
+    }
+    ontimer(fun, t = 0) {
+        if(typeof fun === 'function') {
+            return globalThis.setTimeout(fun, t);
+        }
+    }
+    mainloop() {
+        console.warn(`mainloop is a no-op in javascript! the event loop is always running in javascript!`)
+    }
+    done() {
+        return this.mainloop();
+    }
+    getcanvas() {
+        return this.__canvas;
+    }
+    __registeredTurtleShapes = [...Object.values(RawTurtle.TURTLE_SHAPES)]
+    getshapes() {
+        return [...this.__registeredTurtleShapes];
+    }
+    register_shape(name, shape = null) {
+        this.__registeredTurtleShapes.push(name);
+        this.__canvas.registerShape(RawTurtle.buildAppearanceKey(this.__PEN, name), shape ?? name, { protected: true });
+    }
+    addshape(name, shape = null) {
+        this.register_shape(name, shape)
+    }
+    turtles() {
+        return RawTurtle.turtle.map(ref => ref.deref()).filter(i => i);
+    }
+    window_height() {
+        return this.__canvas.window_height;
+    }
+    window_width() {
+        return this.__canvas.window_width;
+    }
+    bye() {
+        this.__canvas.reset({ includeProtected: true });
+        this.__canvas = undefined;
+        RawTurtle.__canvasDirectory[this.__canvasindex] = undefined; // don't mess with the order; indexes of remaining ones need to stay same
+    }
+    exitonclick() {
+        this.__exitonclick = true;
+        // todo: wire to canvas exit
+    }
+    setup(width=RawTurtle._CFG.width, height=RawTurtle._CFG.height, startx=RawTurtle._CFG.leftright, starty=RawTurtle._CFG.topbottom) {
+        // this is out of scope for this lib, as this would rely on the dimensions of the browser-window this is running in...
+    }
+    title() {
+        // this is out of scope for this lib..
+    }
+
+}
+
+class Queue {
+    __queue = []
+    __running = false;
+    static sleep(ms) {
+        return new Promise(res => setTimeout(res, ms));
+    }
+    queue(job) {
+        this.__queue.push(job);
+        this.__processIfRequired();
+    }
+    async __processIfRequired() {
+        if(this.__running) {
+            return;
+        }
+        this.__running = true;
+        while(this.__queue.length) {
+            await this.__queue.shift()();
+        }
+        this.__running = false;
+    }
+    get length() {
+        return this.__queue.length;
+    }
+    isRunning() {
+        return this.__running;
+    }
 
 
 }
 
-const sleep = ms => new Promise(res => setTimeout(res, ms));
-const turtle = new Turtle({
-    renderInto: document.getElementById("screen")
+const createProxiedTurtle = tt => new Proxy(tt, {
+    defineProperty(target, prop, descriptor) {
+        return  prop.startsWith("__") ? false : Reflect.defineProperty(target, prop, descriptor);
+    },
+    deleteProperty(target, prop) {
+        return  prop.startsWith("__") ? false : Reflect.deleteProperty(target, prop);
+    },
+    get(target, prop, receiver) {
+        return prop.startsWith("__") ? undefined : (target[prop]?.bind?.(target) ?? target[prop]);
+    },
+    getOwnPropertyDescriptor(target, prop) {
+        return prop.startsWith("__") ? undefined : Object.getOwnPropertyDescriptor(target, prop)
+    },
+    getPrototypeOf(target) {
+        return Object.getPrototypeOf(target);
+    },
+    has(target, key) {
+        return key.startsWith("__") ? false : key in target;
+    },
+    isExtensible(target) {
+        return Reflect.isExtensible(target);
+    },
+    preventExtensions(target) {
+        return Reflect.preventExtensions(target);
+    },
+    ownKeys(target) {
+        return Reflect.ownKeys(target).filter(i => !i.startsWith('__'));
+    },
+    set(obj, prop, value) {
+        if(prop.startsWith("__")) {
+            return;
+        }
+        return Reflect.set(obj, prop, value)
+    },
+    setPrototypeOf(monster1, monsterProto) {
+        return false;
+    }
+});
+const PublicRawTurtle = new Proxy(RawTurtle, {
+    construct(target, args) {
+        const tt = new target(...args);
+        return createProxiedTurtle(tt);
+    },
+    apply() {
+        throw new Error(`RawTurtle must be called with 'new'`)
+    },
+    defineProperty() {
+        throw new Error(`You can't define new Properties on RawTurtle`)
+    },
+    deleteProperty() {
+        throw new Error(`You delete Properties from RawTurtle`)
+    },
+    get(target, prop, receiver) {
+        return prop.startsWith("__") ? undefined : target[prop];
+    },
+    getOwnPropertyDescriptor(target, prop) {
+        return prop.startsWith("__") ? undefined : Object.getOwnPropertyDescriptor(target, prop)
+    },
+    getPrototypeOf(target) {
+        return Object.getPrototypeOf(target);
+    },
+    has(target, key) {
+        return key.startsWith("__") ? false : key in target;
+    },
+    isExtensible(target) {
+        return Reflect.isExtensible(target);
+    },
+    preventExtensions(target) {
+        return Reflect.preventExtensions(target);
+    },
+    ownKeys(target) {
+        return Reflect.ownKeys(target).filter(i => !i.startsWith('__'));
+    },
+    set(obj, prop, value) {
+        if(prop.startsWith("__")) {
+            return;
+        }
+        return Reflect.set(obj, prop, value)
+    },
+    setPrototypeOf(monster1, monsterProto) {
+        return false;
+    }
 });
 
-for(var i = 0; i < 5; i ++) {
-    turtle.goto(10 * i, 10 * i)
-    turtle.setheading(0)
-    turtle.pendown()
-    turtle.setheading(0)
-    await sleep(100)
-    turtle.forward(20);
-    await sleep(100)
-    turtle.left(45)
-    await sleep(100)
-    turtle.forward(10);
-    await sleep(100)
-    turtle.left(45)
-    await sleep(100)
-    turtle.forward(10);
-    await sleep(100)
-    turtle.left(45)
-    await sleep(100)
-    turtle.forward(10);
-    await sleep(100)
-    turtle.left(45)
-    await sleep(100)
-    turtle.forward(10);
-    await sleep(100)
-    turtle.left(45)
-    await sleep(100)
-    turtle.forward(10);
-    await sleep(100)
-    turtle.left(45)
-    await sleep(100)
-    turtle.forward(10);
-    await sleep(100)
-    turtle.left(45)
-    await sleep(100)
-    turtle.forward(10);
-    await sleep(100)
-    turtle.left(45)
-    await sleep(100)
-    turtle.forward(10);
-    await sleep(100)
-    turtle.penup()
+
+class Turtle {
+    constructor({ renderInto, rawTurtle: q, canvas, prompt }) {
+        let rawTurtle;
+        if(q) {
+            rawTurtle = createProxiedTurtle(q);
+        } else {
+            rawTurtle = new PublicRawTurtle(canvas, renderInto);
+            rawTurtle.setundobuffer(1000);
+        }
+        this.#rawTurtle = rawTurtle;
+        this.#prompt = prompt;
+        for(const property of Object.getOwnPropertyNames(PublicRawTurtle.prototype)) {
+            if(this[property]) {
+                continue;
+            }
+            if(typeof rawTurtle[property] === 'function' && property !== 'constructor') {
+                this[property] = (...args) => {
+                    this.__optCount++;
+                    return new Value({ operation: property, opt: this.__optCount }, new Promise((res, rej) => {
+                        this.__queue.queue(async () => {
+                            try {
+                                const awaitedArgs = await Promise.all(args.map((v) => {
+                                    if(v instanceof Value) return v.promise;
+                                    return v;
+                                }));
+                                const returnvalue = rawTurtle[property](...awaitedArgs);
+                                // todo: delay, tracer
+                                // todo: annotate functions to indicate if they take time
+                                const speed = rawTurtle.speed();
+                                if(speed) {
+                                    await Queue.sleep(speed * 100);
+                                }
+                                return res(returnvalue);
+                            } catch(e) {
+                                rej(e);
+                            }
+                        });
+                    }));
+                };
+            }
+        }
+    }
+    __queue = new Queue();
+    __optCount = 0;
+    #rawTurtle;
+    #prompt;
+    clone() {
+        const rawTurtle = this.#rawTurtle;
+        this.__optCount++;
+        const q = rawTurtle.clone();
+        return new Turtle({ rawTurtle: q, prompt: this.#prompt });
+    }
+    getturtle() {
+        return this;
+    }
+    getpen() {
+        return this.getturtle();
+    }
+    textinput(...args) {
+        this.__optCount++;
+        return new Value({ operation: "textinput", opt: this.__optCount }, new Promise((res, rej) => {
+            this.__queue.queue(async () => {
+                try {
+                    const [title, prompt] = await Promise.all(args.map((v) => {
+                        if(v instanceof Value) return v.promise;
+                        return v;
+                    }));
+                    const returnvalue = await this.#prompt.textinput({
+                        title,
+                        prompt,
+                    });
+                    return res(returnvalue);
+                } catch(e) {
+                    rej(e);
+                }
+            });
+        }));
+    }
+    numinput(...args) {
+        this.__optCount++;
+        return new Value({ operation: "numinput", opt: this.__optCount }, new Promise((res, rej) => {
+            this.__queue.queue(async () => {
+                try {
+                    const [
+                        title,
+                        prompt,
+                        defaultVal,
+                        minVal,
+                        maxVal
+                    ] = await Promise.all(args.map((v) => {
+                        if(v instanceof Value) return v.promise;
+                        return v;
+                    }));
+                    const returnvalue = await this.#prompt.numinput({
+                        title,
+                        prompt,
+                        defaultVal,
+                        minVal,
+                        maxVal
+                    });
+                    return res(returnvalue);
+                } catch(e) {
+                    rej(e);
+                }
+            });
+        }));
+    }
+}
+
+class PixiTurtle extends Turtle {
+    constructor(obj) {
+        super({ ...obj, canvas: PixiCanvas.defaultCanvas, prompt: Dialog.defaultDialog })
+    }
+}
+
+const turtle = new PixiTurtle({
+    renderInto: document.getElementById("screen")
+});
+turtle.bgcolor("green");
+// turtle.screensize(1000, 1000)
+turtle.bgpic('https://picsum.photos/%x/%y');
+const q = await turtle.clone();
+q.speed(5);
+sampleDraw(q, -50);
+sampleDraw(turtle, 0);
+turtle.clearscreen();
+const r = await turtle.textinput("Secret", "What's the secret?")
+console.log(r);
+const rr = await turtle.textinput("Secret 2", "What's the secret?")
+console.log(rr);
+const l = await turtle.numinput("Secret", "What's the secret?")
+console.log(l);
+
+function sampleDraw(turtle, offset) {
+    for(var i = 0; i < 2; i ++) {
+        turtle.speed(i);
+        turtle.log("Speed", i, turtle.speed());
+        turtle.goto(10 * i - offset, 10 * i - offset);
+        turtle.setheading(0);
+        turtle.pendown();
+        turtle.setheading(0);
+        turtle.forward(20);
+        turtle.left(45)
+        turtle.forward(10);
+        turtle.left(45)
+        turtle.forward(10);
+        turtle.left(45)
+        turtle.forward(10);
+        turtle.left(45)
+        turtle.forward(10);
+        turtle.left(45)
+        turtle.forward(10);
+        turtle.left(45)
+        turtle.forward(10);
+        turtle.left(45)
+        turtle.forward(10);
+        turtle.left(45)
+        turtle.forward(10);
+        turtle.penup()
+    }
 }
 
 
